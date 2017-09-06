@@ -1,17 +1,52 @@
 package com.ainvar.flickeruploader
 
-import java.io.File
+import java.io
+import java.io.{File, PrintWriter, Writer}
 import java.security.MessageDigest
+import java.util.ArrayList
+import java.awt.Desktop
+import java.net.URI
+import javax.print.DocFlavor.URL
 
+import org.scribe.model.{Token, Verifier}
 import org.slf4j.Logger
 import play.api.libs.json._
 import play.api.libs.ws.{WSRequest, WSResponse}
 
 import scala.collection.SortedMap
+import scala.io.StdIn
 //import play.api.libs.ws.ahc.AhcWSClient
-import com.aetrion.flickr._
 
-object Flickr {
+import java.awt.Desktop
+import com.ainvar.flickeruploader.control._
+
+import com.flickr4java.flickr.Flickr
+import com.flickr4java.flickr.FlickrException
+import com.flickr4java.flickr.REST
+import com.flickr4java.flickr.auth.Auth
+import com.flickr4java.flickr.auth.AuthInterface
+import com.flickr4java.flickr.auth.Permission
+import com.flickr4java.flickr.util.IOUtilities
+import com.flickr4java.flickr.uploader.UploadMetaData
+
+
+object Flik {
+  val photoSuffixes = Set("jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff")
+
+  val videoSuffixes = Set("3gp", "3gp", "avi", "mov", "mp4", "mpg", "mpeg", "wmv", "ogg", "ogv", "m2v")
+
+  private def isValidSuffix(basefilename: String): Boolean = {
+    if (basefilename.lastIndexOf('.') <= 0) return false
+    val suffix = basefilename.substring(basefilename.lastIndexOf('.') + 1).toLowerCase
+    if((photoSuffixes contains suffix) || (videoSuffixes contains suffix)) true else false
+  }
+
+  def getMimeType(suffix:String): String = suffix.toLowerCase() match {
+    case "mpg" | "mpeg" => "video/mpeg"
+    case "jpg" | "jpeg" => "image/jpg"
+    case "mov" => "image/quicktime"
+  }
+
   def isSupportedFlickrType(f: File) : Boolean = {
     println(f.getAbsolutePath)
     val lowerName = f.getName.toLowerCase()
@@ -28,10 +63,133 @@ object Flickr {
   }
 }
 
-class Flickr {
-  val apiKey = "mykey"
-  val secret = "mysecret"
+class Flik {
+  val apiKey = ""
+  val secret = ""
 
+//  val flickr = new Flickr4(apiKey, secret, new REST)
+
+  val lines: Option[List[String]] = readTextFile("token.txt")
+
+  val flickr = new Flickr(apiKey, secret, new REST)
+
+  val token: String = lines match {
+    case Some(lines) => lines.mkString
+    case None =>
+
+      Flickr.debugStream = false
+      val authInterface = flickr.getAuthInterface
+
+//      val scanner = new Scanner(System.in);
+
+      val token = authInterface.getRequestToken
+      println("token: " + token)
+
+      val url = authInterface.getAuthorizationUrl(token, Permission.WRITE)
+
+      if (Desktop.isDesktopSupported) Desktop.getDesktop.browse(new URI(url))
+
+      println("Follow this URL to authorise yourself on Flickr")
+      println(url)
+      println("Paste in the token it gives you:")
+      print(">>")
+
+      val tokenKey = StdIn.readLine("Type code:")//scanner.nextLine
+//      scanner.close
+
+      val requestToken: Token = authInterface.getAccessToken(token, new Verifier(tokenKey))
+      println("GREAT!! AUTHENTICATION SUCCESS!!!!")
+
+      val auth = authInterface.checkToken(requestToken)
+
+      val pw = new PrintWriter(new File("token.txt" ))
+      pw.write(requestToken.getToken)
+      pw.close()
+
+      // This token can be used until the user revokes it.
+      println("\nToken: " + requestToken.getToken)
+      println("\nSecret: " + requestToken.getSecret)
+      println("\nnsid: " + auth.getUser.getId)
+      println("\nRealname: " + auth.getUser.getRealName)
+      println("\nUsername: " + auth.getUser.getUsername)
+      println("\nPermission: " + auth.getPermission.getType)
+      requestToken.getToken
+  }
+
+//  val uploader = new Uploader(apiKey, secret)
+
+  private def getBasicMetadata = new UploadMetaData{
+    setPublicFlag(false)
+    setFriendFlag(false)
+    setFamilyFlag(true)
+  }
+
+  def readTextFile(filename: String): Option[List[String]] = {
+    try {
+      val lines = Control.using(scala.io.Source.fromFile(filename)) { source =>
+        (for (line <- source.getLines) yield line).toList
+      }
+      Some(lines)
+    } catch {
+      case e: Exception => {
+        println("File " + filename + " impossible to load: " + e)
+        None
+      }
+    }
+  }
+
+  def uploadFotos(folder: String) = {
+
+    val tagsFromFolderName: List[String] = folder.split("-").toList
+
+    val d = new File(folder)
+
+    val files = if (d.exists && d.isDirectory) {
+                  d.listFiles.filter(_.isFile).toList
+                } else {
+                  List[File]()
+                }
+
+    for(file <- files){
+      val suffix = file.getName.substring(file.getName.lastIndexOf('.') + 1).toLowerCase
+      if(Flik.isValidSuffix(suffix)) {
+        val elems = file.getName.substring(0, file.getName.lastIndexOf('.')).split("-")
+
+        val title = elems.head
+
+        val allTags: List[String] = tagsFromFolderName ::: ((elems.tail.headOption map {
+          _.split("_").toList
+        }) getOrElse (List("ScalaImporter")))
+
+        val tagCollection = new ArrayList[String]()
+
+        allTags.foreach(tagCollection.add)
+
+        val metaData = getBasicMetadata
+        metaData.setFilemimetype(Flik.getMimeType(suffix))
+        metaData.setTitle(title)
+        metaData.setTags(tagCollection)
+        metaData.setFilename(file.getName)
+
+        val uploader = flickr.getUploader()
+
+        val photoId = uploader.upload(file, metaData);
+
+        println(" File : " + file.getName + " uploaded: photoId = " + photoId)
+      }
+    }
+  }
+
+// uploader.upload()
+  //val frob: String = authInterface.getFrob()
+
+//  def startAuth(f: Flickr4, auth: AuthInterface) = {
+//    val accessToken = auth.
+//  }
+//
+//  def completeAuth = {
+//
+//  }
 //  val endpoint = "http://api.flickr.com/services/rest"
 //
 //  val apiKey: String

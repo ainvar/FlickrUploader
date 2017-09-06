@@ -16,7 +16,7 @@ libraryDependencies ++= Seq(
   "com.h2database"  %  "h2"                % "1.4.195",
   "ch.qos.logback"  %  "logback-classic"   % "1.2.3",
   "com.typesafe.play" %% "play-ws" % "2.6.2",
-  "com.aetrion.flickr" % "flickrapi" % "1.1"
+  "com.flickr4java" % "flickr4java" % "2.11"
 )
 
 fork in run := true

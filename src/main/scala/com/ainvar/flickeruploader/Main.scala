@@ -1,8 +1,12 @@
 package com.ainvar.flickeruploader
 
+import java.io.File
+
 import scalafx.scene.control._
 import scalafx.scene.input.{KeyCode, KeyCodeCombination, KeyCombination}
 import scalafx.stage.DirectoryChooser
+
+import com.flickr4java.flickr.auth.Permission
 
 //import scalafx.Includes._
 //import scalafx.application.{JFXApp, Platform}
@@ -34,6 +38,8 @@ object Main extends JFXApp {
   println("Command line arguments:\n" +
     "  unnamed: " + parameters.unnamed.mkString("[", ", ", "]") + "\n" +
     "  named  : " + parameters.named.mkString("[", ", ", "]"))
+
+  var folderToUpload = ""
 
 val lblFileSelected = new Label("Cartella delle foto")
 //  private def createOpenButton() = new Button {
@@ -136,21 +142,68 @@ val lblFileSelected = new Label("Cartella delle foto")
 //      content = List(menuBar, menuButton, splitMenuButton, label)
       content = List(menuBar, label, btnUpload)
 
-      exitItem.onAction = _ => sys.exit(0)
+      exitItem.onAction = _ => {
+        println("Ciao!!")
+        sys.exit(0)
+      }
 
       openItem.onAction = _ => {
-        val dc = new DirectoryChooser(){
+        val dc = new DirectoryChooser() {
           title="Select the folder that contain all the pictures to upload"
         }
 
-        val selectedFolder = dc.showDialog(stage)
-
+        val selectedFolder: File = dc.showDialog(stage)
+        folderToUpload = selectedFolder.toString
 //        val fc = new FileChooser
 //        val selectedFile = fc.showOpenDialog(stage)
+        println("Folder selected for upload: " + selectedFolder)
         label.text = "Ready: " + selectedFolder
       }
 
+      btnUpload.onAction = _ => {
+        println("Upload button pressed!!")
+        println("Folder choosen for upload: " + folderToUpload)
+        val flik = new Flik
+        flik.uploadFotos(folderToUpload)
+      }
     }
   }
+
+//  def doAuth(api: Flickr): Auth = {
+//    val authIntf = api.getAuthInterface
+//
+//    val prefix = "Auth.";
+//    val conf = ConfigFactory.load();
+//    val token = conf.getString(prefix + "token")
+//    val secret = conf.getString(prefix + "secret");
+//
+//    var requestToken: Token = null
+//
+//    if (token.isEmpty()) {
+//      val scanner = new Scanner(System.in)
+//      val token = authIntf.getRequestToken()
+//      val url = authIntf.getAuthorizationUrl(token, Permission.DELETE)
+//      Desktop.getDesktop.browse(URI.create(url))
+//      println("Paste in the token it gives you:")
+//      print(">>")
+//      val tokenKey = scanner.nextLine()
+//      scanner.close()
+//      requestToken = authIntf.getAccessToken(token, new Verifier(tokenKey))
+//      println("Authentication success")
+//    } else {
+//      requestToken = new Token(token, secret)
+//    }
+//
+//    val auth = authIntf.checkToken(requestToken)
+//    println(" Token: " + requestToken.getToken());
+//    println(" Secret: " + requestToken.getSecret());
+//    println(" Id: " + auth.getUser().getId())
+//    println(" Realname: " + auth.getUser().getRealName())
+//    println(" Username: " + auth.getUser().getUsername())
+//    println(" Permission: " + auth.getPermission().getType())
+//
+//    auth
+//  }
+
 }
 
