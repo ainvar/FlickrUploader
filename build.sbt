@@ -15,6 +15,7 @@ libraryDependencies ++= Seq(
   "org.scalikejdbc" %% "scalikejdbc"       % "3.0.0",
   "com.h2database"  %  "h2"                % "1.4.195",
   "ch.qos.logback"  %  "logback-classic"   % "1.2.3",
+  "com.typesafe.scala-logging" %% "scala-logging" % "3.7.2",
   "com.typesafe.play" %% "play-ws" % "2.6.2",
   "com.flickr4java" % "flickr4java" % "2.11"
 )
