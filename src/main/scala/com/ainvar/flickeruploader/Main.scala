@@ -1,12 +1,12 @@
 package com.ainvar.flickeruploader
 
-import java.io.File
+import java.io.{File, PrintWriter}
 
 import scalafx.scene.control._
 import scalafx.scene.input.{KeyCode, KeyCodeCombination, KeyCombination}
 import scalafx.stage.DirectoryChooser
-
 import com.flickr4java.flickr.auth.Permission
+import com.typesafe.scalalogging.LazyLogging
 
 //import scalafx.Includes._
 //import scalafx.application.{JFXApp, Platform}
@@ -25,17 +25,21 @@ import scalafx.application.JFXApp.PrimaryStage
 import scalafx.scene.Scene
 import scalafx.scene.control.{Button, Label}
 
+import com.ainvar.flickeruploader.action.FileSystem
+
+import org.scribe.model.{Token, Verifier}
+
 //case class DialogTextData(tableName:String, connString:String, filePath:String)
 case class DialogTextData(praticaId:String)
 
-object Main extends JFXApp {
+object Main extends JFXApp with LazyLogging {
   // UI build
 
   // Do something with command line arguments here we print them
   // Named arguments have a form: --name=value
   // For instance, "--output=alpha beta" is interpreted as named argument "output"
   // with value "alpha" and unnamed parameter "beta".
-  println("Command line arguments:\n" +
+  logger.info("Command line arguments:\n" +
     "  unnamed: " + parameters.unnamed.mkString("[", ", ", "]") + "\n" +
     "  named  : " + parameters.named.mkString("[", ", ", "]"))
 
@@ -64,6 +68,7 @@ val lblFileSelected = new Label("Cartella delle foto")
   // but you can create other stages if you need to.
   stage = new PrimaryStage {
     title = "Pictures uploader for Flickr"
+    val flik = new Flik
     scene = new Scene(600, 300) {
 //      root = new BorderPane {
 //        padding = Insets(25)
@@ -136,34 +141,70 @@ val lblFileSelected = new Label("Cartella delle foto")
       label.layoutX = 29
       label.layoutY = 50
 
+      val tokenByWeb = new TextField() {
+        promptText = "Token from web!"
+        visible = false
+        layoutY = 70
+        layoutX = 29
+      }
+
       val contextMenu = new ContextMenu(new MenuItem("Context 1"), new MenuItem("Context 2"), new MenuItem("Context 3"))
       label.contextMenu = contextMenu
 
 //      content = List(menuBar, menuButton, splitMenuButton, label)
-      content = List(menuBar, label, btnUpload)
+      content = List(menuBar, label, tokenByWeb, btnUpload)
 
       exitItem.onAction = _ => {
-        println("Ciao!!")
+        logger.info("Ciao!!")
         sys.exit(0)
       }
 
       openItem.onAction = _ => {
         val dc = new DirectoryChooser() {
-          title="Select the folder that contain all the pictures to upload"
+          title="Select the folder that contains all the pictures to upload"
         }
 
         val selectedFolder: File = dc.showDialog(stage)
         folderToUpload = selectedFolder.toString
 //        val fc = new FileChooser
 //        val selectedFile = fc.showOpenDialog(stage)
-        println("Folder selected for upload: " + selectedFolder)
+        logger.info("Folder selected for upload: " + selectedFolder)
         label.text = "Ready: " + selectedFolder
+
+        if(!FileSystem.exist("token.txt")) {
+          btnUpload.disable = true
+          val url = flik.openAuthenticationUrl
+          label.text = "Need authentication to go ahead! Follow link " + url + " in the browser"
+          tokenByWeb.visible = true
+        }
+        else
+          tokenByWeb.visible = false
+
+      }
+
+      tokenByWeb.onKeyPressed =_ => {
+        btnUpload.disable = false
       }
 
       btnUpload.onAction = _ => {
-        println("Upload button pressed!!")
-        println("Folder choosen for upload: " + folderToUpload)
-        val flik = new Flik
+        logger.info("Upload button pressed!!")
+        logger.info("Folder choosen for upload: " + folderToUpload)
+        if(tokenByWeb.visible.value){
+          val auth = flik.grantFirstAuth(tokenByWeb.text.value)
+
+          val pw = new PrintWriter(new File("token.txt" ))
+          pw.write(auth.accessToken.getToken)
+          pw.write(";")
+          pw.write(auth.accessToken.getSecret)
+          pw.close()
+
+          logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
+        }
+        else{
+          val tokenContent: List[String] = FileSystem.readTextFile("token.txt").split(";").toList
+          val accessToken = new Token(tokenContent.head,tokenContent.last)
+          val auth = flik.grantAuth(accessToken)
+        }
         flik.uploadFotos(folderToUpload)
       }
     }

@@ -1,6 +1,6 @@
 package com.ainvar.flickeruploader
 
-import java.io
+import java.{io, util}
 import java.io.{File, PrintWriter, Writer}
 import java.security.MessageDigest
 import java.util.ArrayList
@@ -8,6 +8,8 @@ import java.awt.Desktop
 import java.net.URI
 import javax.print.DocFlavor.URL
 
+import com.flickr4java.flickr.people.User
+import com.typesafe.scalalogging.LazyLogging
 import org.scribe.model.{Token, Verifier}
 import org.slf4j.Logger
 import play.api.libs.json._
@@ -21,6 +23,7 @@ import java.awt.Desktop
 import com.ainvar.flickeruploader.control._
 
 import com.flickr4java.flickr.Flickr
+import com.flickr4java.flickr.RequestContext
 import com.flickr4java.flickr.FlickrException
 import com.flickr4java.flickr.REST
 import com.flickr4java.flickr.auth.Auth
@@ -29,6 +32,9 @@ import com.flickr4java.flickr.auth.Permission
 import com.flickr4java.flickr.util.IOUtilities
 import com.flickr4java.flickr.uploader.UploadMetaData
 
+
+case class FirstStepAuthData(requestToken: Token, authUrl: String)
+case class LastStepAuth(accessToken: Token, auth:Auth)
 
 object Flik {
   val photoSuffixes = Set("jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff")
@@ -63,84 +69,61 @@ object Flik {
   }
 }
 
-class Flik {
+class Flik  extends LazyLogging {
   val apiKey = ""
   val secret = ""
 
-//  val flickr = new Flickr4(apiKey, secret, new REST)
+  private lazy val flickr = new Flickr(apiKey, secret, new REST)
 
-  val lines: Option[List[String]] = readTextFile("token.txt")
+  private lazy val authInterface = flickr.getAuthInterface
 
-  val flickr = new Flickr(apiKey, secret, new REST)
+  private lazy val firstStepAuth = {
+    Flickr.debugStream = false
+    val authInterface = flickr.getAuthInterface
 
-  val token: String = lines match {
-    case Some(lines) => lines.mkString
-    case None =>
+    val token: Token = authInterface.getRequestToken
+    logger.info("token: " + token)
 
-      Flickr.debugStream = false
-      val authInterface = flickr.getAuthInterface
+    val url = authInterface.getAuthorizationUrl(token, Permission.WRITE)
 
-//      val scanner = new Scanner(System.in);
+    if (Desktop.isDesktopSupported) Desktop.getDesktop.browse(new URI(url))
 
-      val token = authInterface.getRequestToken
-      println("token: " + token)
-
-      val url = authInterface.getAuthorizationUrl(token, Permission.WRITE)
-
-      if (Desktop.isDesktopSupported) Desktop.getDesktop.browse(new URI(url))
-
-      println("Follow this URL to authorise yourself on Flickr")
-      println(url)
-      println("Paste in the token it gives you:")
-      print(">>")
-
-      val tokenKey = StdIn.readLine("Type code:")//scanner.nextLine
-//      scanner.close
-
-      val requestToken: Token = authInterface.getAccessToken(token, new Verifier(tokenKey))
-      println("GREAT!! AUTHENTICATION SUCCESS!!!!")
-
-      val auth = authInterface.checkToken(requestToken)
-
-      val pw = new PrintWriter(new File("token.txt" ))
-      pw.write(requestToken.getToken)
-      pw.close()
-
-      // This token can be used until the user revokes it.
-      println("\nToken: " + requestToken.getToken)
-      println("\nSecret: " + requestToken.getSecret)
-      println("\nnsid: " + auth.getUser.getId)
-      println("\nRealname: " + auth.getUser.getRealName)
-      println("\nUsername: " + auth.getUser.getUsername)
-      println("\nPermission: " + auth.getPermission.getType)
-      requestToken.getToken
+    logger.info("Follow this URL" + url + " to authorise yourself on Flickr")
+    FirstStepAuthData(token, url)
   }
 
-//  val uploader = new Uploader(apiKey, secret)
+  private def getAccessToken(webToken: String): Token = {
+    val authInterface = flickr.getAuthInterface
+    authInterface.getAccessToken(firstStepAuth.requestToken, new Verifier(webToken))
+  }
 
-  private def getBasicMetadata = new UploadMetaData{
+  private def getBasicMetadata = new UploadMetaData {
     setPublicFlag(false)
     setFriendFlag(false)
     setFamilyFlag(true)
   }
 
-  def readTextFile(filename: String): Option[List[String]] = {
-    try {
-      val lines = Control.using(scala.io.Source.fromFile(filename)) { source =>
-        (for (line <- source.getLines) yield line).toList
-      }
-      Some(lines)
-    } catch {
-      case e: Exception => {
-        println("File " + filename + " impossible to load: " + e)
-        None
-      }
-    }
+  def grantFirstAuth(webToken: String): LastStepAuth = {
+    val accessToken = getAccessToken(webToken)
+    val auth = authInterface.checkToken(accessToken)
+    RequestContext.getRequestContext.setAuth(auth)
+    LastStepAuth(accessToken, auth)
   }
 
-  def uploadFotos(folder: String) = {
+  def grantAuth(accessToken: Token): Auth = {
+    val auth = authInterface.checkToken(accessToken)
+    RequestContext.getRequestContext.setAuth(auth)
+    auth
+  }
 
-    val tagsFromFolderName: List[String] = folder.split("-").toList
+  def openAuthenticationUrl: String = firstStepAuth.authUrl
+
+  def uploadFotos(folder: String) = {
+    logger.info("I'm uploading...")
+    val tagsFromFolderName: List[String] = folder.split("/").last.split("_").toList
+
+    if(tagsFromFolderName.length >0) logger.info("tags found by folder name: " + tagsFromFolderName)
+    else logger.info("no tag found from folder name :-( ")
 
     val d = new File(folder)
 
@@ -150,18 +133,20 @@ class Flik {
                   List[File]()
                 }
 
+    logger.info("file discovered :" + files.length)
+
     for(file <- files){
       val suffix = file.getName.substring(file.getName.lastIndexOf('.') + 1).toLowerCase
-      if(Flik.isValidSuffix(suffix)) {
+      if(Flik.isValidSuffix(file.getName)) {
         val elems = file.getName.substring(0, file.getName.lastIndexOf('.')).split("-")
 
         val title = elems.head
 
-        val allTags: List[String] = tagsFromFolderName ::: ((elems.tail.headOption map {
+        val allTags: List[String] = "ScalaImporter" :: tagsFromFolderName ::: ((elems.tail.headOption map {
           _.split("_").toList
-        }) getOrElse (List("ScalaImporter")))
+        }) getOrElse List("ScalaImporter"))
 
-        val tagCollection = new ArrayList[String]()
+        val tagCollection = new util.ArrayList[String]()
 
         allTags.foreach(tagCollection.add)
 
@@ -173,11 +158,19 @@ class Flik {
 
         val uploader = flickr.getUploader()
 
-        val photoId = uploader.upload(file, metaData);
+        val photoId = uploader.upload(file, metaData)
 
-        println(" File : " + file.getName + " uploaded: photoId = " + photoId)
+        logger.info(" File : " + file.getName + " uploaded: photoId = " + photoId)
       }
+      else
+        logger.info("No valid suffix: " + suffix)
     }
+    logger.info(s"All pictures inside folder: $folder uploaded successfully!!")
+    0
+  }
+
+  def uploadRec = {
+
   }
 
 // uploader.upload()
