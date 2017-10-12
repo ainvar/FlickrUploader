@@ -3,6 +3,8 @@ package com.ainvar.flickeruploader.action
 import java.io._
 
 import com.ainvar.flickeruploader.control._
+
+import scala.annotation.tailrec
 /*
 To convert in scala way IO access, using lib as:
 scala-io
@@ -20,11 +22,25 @@ object FileSystem {
     if(fileTemp.exists()) true else false
   }
 
-//  import scala.collection.JavaConversions._
-
-  def getFileTree(f: File): Stream[File] =
-    f #:: (if (f.isDirectory) f.listFiles().toStream.flatMap(getFileTree)
+  def getFileTreeRec(f: File): Stream[File] =
+    f #:: (if (f.isDirectory) f.listFiles().toStream.flatMap(getFileTreeRec)
     else Stream.empty)
 
+
+  def getFileTreeTailRec(f: File, acc: Stream[File] = Stream.empty): Stream[File] =
+    if (f.isDirectory) {
+      println("Directory!!!  :  " + f.getAbsolutePath)
+      f.listFiles().toStream.flatMap(file => getFileTreeTailRec(file, acc))
+    }
+    else
+      f #::acc
+
+  def getAllFolders(f: File, acc: Stream[File] = Stream.empty): Stream[File] =
+    if (f.isDirectory) {
+      println("Directory!!!  :  " + f.getAbsolutePath)
+      f.listFiles().toStream.flatMap(file => getFileTreeTailRec(file, f #:: acc))
+    }
+    else
+      acc
 }
 

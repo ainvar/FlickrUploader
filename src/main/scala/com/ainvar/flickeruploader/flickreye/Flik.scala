@@ -1,40 +1,25 @@
-package com.ainvar.flickeruploader
+package com.ainvar.flickeruploader.flickreye
 
-import java.{io, util}
-import java.io.{File, PrintWriter, Writer}
-import java.security.MessageDigest
-import java.util.ArrayList
-import java.awt.Desktop
+import java.io.File
 import java.net.URI
-import javax.print.DocFlavor.URL
+import java.util
 
-import com.flickr4java.flickr.people.User
+import com.ainvar.flickeruploader.action.FileSystem
 import com.typesafe.scalalogging.LazyLogging
 import org.scribe.model.{Token, Verifier}
-import org.slf4j.Logger
-import play.api.libs.json._
-import play.api.libs.ws.{WSRequest, WSResponse}
-
-import scala.collection.SortedMap
-import scala.io.StdIn
 //import play.api.libs.ws.ahc.AhcWSClient
 
 import java.awt.Desktop
-import com.ainvar.flickeruploader.control._
 
-import com.flickr4java.flickr.Flickr
-import com.flickr4java.flickr.RequestContext
-import com.flickr4java.flickr.FlickrException
-import com.flickr4java.flickr.REST
-import com.flickr4java.flickr.auth.Auth
-import com.flickr4java.flickr.auth.AuthInterface
-import com.flickr4java.flickr.auth.Permission
-import com.flickr4java.flickr.util.IOUtilities
+import com.flickr4java.flickr.auth.{Auth, Permission}
 import com.flickr4java.flickr.uploader.UploadMetaData
+import com.flickr4java.flickr.{Flickr, REST, RequestContext}
 
 
 case class FirstStepAuthData(requestToken: Token, authUrl: String)
 case class LastStepAuth(accessToken: Token, auth:Auth)
+
+case class FileDetails(name:String, suffix: String, tags: Array[String], tagsFromFolder: Array[String])
 
 object Flik {
   val photoSuffixes = Set("jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff")
@@ -103,6 +88,34 @@ class Flik  extends LazyLogging {
     setFamilyFlag(true)
   }
 
+  private def getTagsFromAbsolutePath(absolutePath: String): Array[String] = {
+    val paths = absolutePath.split("/")
+    paths(paths.length-2).split("-")
+  }
+
+  private def getFileDetails(file: File): FileDetails ={
+    val name = file.getName
+    val elems = name.substring(0, name.lastIndexOf('.')).split("_")
+
+    val tags =
+      if(elems.tail.length ==0)
+                  Array[String]()
+      else{
+        println("######### tail:" + elems.tail.mkString("*"))
+        elems.tail.head.split("-")
+
+      }
+
+    val suffix = file.getName.substring(file.getName.lastIndexOf('.') + 1).toLowerCase
+    FileDetails(elems.head, suffix, tags, getTagsFromAbsolutePath(file.getAbsolutePath))
+  }
+
+  private def upload(file: File, metaData: UploadMetaData)= {
+      val uploader = flickr.getUploader()
+      val photoId = uploader.upload(file, metaData)
+      logger.info(" File : " + file.getName + " uploaded: photoId = " + photoId)
+  }
+
   def grantFirstAuth(webToken: String): LastStepAuth = {
     val accessToken = getAccessToken(webToken)
     val auth = authInterface.checkToken(accessToken)
@@ -120,7 +133,7 @@ class Flik  extends LazyLogging {
 
   def uploadFotos(folder: String) = {
     logger.info("I'm uploading...")
-    val tagsFromFolderName: List[String] = folder.split("/").last.split("_").toList
+    val tagsFromFolderName: List[String] = folder.split("/").last.split("-").toList
 
     if(tagsFromFolderName.length >0) logger.info("tags found by folder name: " + tagsFromFolderName)
     else logger.info("no tag found from folder name :-( ")
@@ -143,7 +156,7 @@ class Flik  extends LazyLogging {
         val title = elems.head
 
         val allTags: List[String] = "ScalaImporter" :: tagsFromFolderName ::: ((elems.tail.headOption map {
-          _.split("_").toList
+          _.split("-").toList
         }) getOrElse List("ScalaImporter"))
 
         val tagCollection = new util.ArrayList[String]()
@@ -169,8 +182,42 @@ class Flik  extends LazyLogging {
     0
   }
 
-  def uploadRec = {
+  def uploadRec(folder: String) = {
+    val files: Stream[File] = FileSystem.getFileTreeTailRec(new File(folder))
+    for(file <- files){
+      val fileDetails = getFileDetails(file)
+      if(Flik.isValidSuffix(file.getName)) {
+        val title = fileDetails.name
 
+        val allTags: List[String] =
+          "ScalaImporter" ::
+            fileDetails.tags.toList :::
+            fileDetails.tagsFromFolder.toList
+
+
+        val tagCollection = new util.ArrayList[String]()
+
+        allTags.foreach(tagCollection.add)
+
+        val metaData = getBasicMetadata
+        metaData.setFilemimetype(Flik.getMimeType(fileDetails.suffix))
+        metaData.setTitle(title)
+        metaData.setTags(tagCollection)
+        metaData.setFilename(file.getName)
+
+        //upload(file, metaData)
+
+        logger.info("all tags:" + allTags.mkString("**"))
+        logger.info(" File : " + file.getName + " uploaded: photoId = ")
+      }
+      else
+        logger.info("No valid suffix: " + fileDetails.suffix)
+    }
+
+    logger.info("##################  file tree  #####################")
+    logger.info("tree" + files)
+    logger.info("##################  file tree  #####################")
+    0
   }
 
 // uploader.upload()

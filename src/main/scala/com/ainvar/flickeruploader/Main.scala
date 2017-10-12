@@ -2,6 +2,8 @@ package com.ainvar.flickeruploader
 
 import java.io.{File, PrintWriter}
 
+import com.ainvar.flickeruploader.flickreye.Flik
+
 import scalafx.scene.control._
 import scalafx.scene.input.{KeyCode, KeyCodeCombination, KeyCombination}
 import scalafx.stage.DirectoryChooser
@@ -137,6 +139,12 @@ val lblFileSelected = new Label("Cartella delle foto")
         text = "Upload"
       }
 
+      val btnRecUploadSimulation = new Button(){
+        layoutY = 140
+        layoutX = 29
+        text = "Upload"
+      }
+
       val label = new Label("Welcome!!")
       label.layoutX = 29
       label.layoutY = 50
@@ -152,7 +160,7 @@ val lblFileSelected = new Label("Cartella delle foto")
       label.contextMenu = contextMenu
 
 //      content = List(menuBar, menuButton, splitMenuButton, label)
-      content = List(menuBar, label, tokenByWeb, btnUpload)
+      content = List(menuBar, label, tokenByWeb, btnUpload, btnRecUploadSimulation)
 
       exitItem.onAction = _ => {
         logger.info("Ciao!!")
@@ -200,12 +208,36 @@ val lblFileSelected = new Label("Cartella delle foto")
 
           logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
         }
-        else{
+        else {
           val tokenContent: List[String] = FileSystem.readTextFile("token.txt").split(";").toList
           val accessToken = new Token(tokenContent.head,tokenContent.last)
           val auth = flik.grantAuth(accessToken)
         }
         flik.uploadFotos(folderToUpload)
+      }
+
+      btnRecUploadSimulation.onAction = _ => {
+//        logger.info("Upload simulation button pressed!!")
+//        logger.info("Folder choosen for simulate the upload: " + folderToUpload)
+//        val tree: Stream[File] = FileSystem.getFileTreeTailRec(new File(folderToUpload), Stream.empty)
+//
+//        for(path <- tree) {
+//          //logger.info("####### tree value ########### e:" + tree)
+//          val absolutePath = path.getAbsolutePath
+//          logger.info("Path:" + absolutePath)
+//
+//          val paths = absolutePath.split("/")
+//
+//          val folderTags = paths(paths.length-2).split("-")
+//          logger.info("folder tags: " + folderTags.mkString("*"))
+//        }
+
+//        tree map {path => logger.info(path.getAbsolutePath)}
+//        logger.info("")
+        /*val files: Stream[File] = FileSystem.getFileTreeTailRec(new File(folderToUpload))
+
+        for(file <- files) println(file.getName)*/
+        flik.uploadRec(folderToUpload)
       }
     }
   }
