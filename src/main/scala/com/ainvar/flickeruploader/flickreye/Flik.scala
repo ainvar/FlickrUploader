@@ -114,6 +114,7 @@ class Flik  extends LazyLogging {
       val uploader = flickr.getUploader()
       val photoId = uploader.upload(file, metaData)
       logger.info(" File : " + file.getName + " uploaded: photoId = " + photoId)
+      photoId
   }
 
   def grantFirstAuth(webToken: String): LastStepAuth = {
@@ -140,7 +141,7 @@ class Flik  extends LazyLogging {
 
     val d = new File(folder)
 
-    val files = if (d.exists && d.isDirectory) {
+    val files: List[File] = if (d.exists && d.isDirectory) {
                   d.listFiles.filter(_.isFile).toList
                 } else {
                   List[File]()
@@ -179,10 +180,11 @@ class Flik  extends LazyLogging {
         logger.info("No valid suffix: " + suffix)
     }
     logger.info(s"All pictures inside folder: $folder uploaded successfully!!")
-    0
+    files.length
   }
 
-  def uploadRec(folder: String) = {
+  def RecUpload(folder: String) = {
+    logger.info("I'm uploading all tree...")
     val files: Stream[File] = FileSystem.getFileTreeTailRec(new File(folder))
     for(file <- files){
       val fileDetails = getFileDetails(file)
@@ -190,7 +192,7 @@ class Flik  extends LazyLogging {
         val title = fileDetails.name
 
         val allTags: List[String] =
-          "ScalaImporter" ::
+          "ScalaImporterRec" ::
             fileDetails.tags.toList :::
             fileDetails.tagsFromFolder.toList
 
@@ -205,18 +207,14 @@ class Flik  extends LazyLogging {
         metaData.setTags(tagCollection)
         metaData.setFilename(file.getName)
 
-        //upload(file, metaData)
-
         logger.info("all tags:" + allTags.mkString("**"))
-        logger.info(" File : " + file.getName + " uploaded: photoId = ")
+
+        upload(file, metaData)
+
       }
       else
         logger.info("No valid suffix: " + fileDetails.suffix)
     }
-
-    logger.info("##################  file tree  #####################")
-    logger.info("tree" + files)
-    logger.info("##################  file tree  #####################")
     0
   }
 

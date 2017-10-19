@@ -1,14 +1,21 @@
 package com.ainvar.flickeruploader
 
 import java.io.{File, PrintWriter}
+import javafx.event.EventHandler
+import javafx.stage.WindowEvent
 
 import com.ainvar.flickeruploader.flickreye.Flik
 
 import scalafx.scene.control._
 import scalafx.scene.input.{KeyCode, KeyCodeCombination, KeyCombination}
 import scalafx.stage.DirectoryChooser
-import com.flickr4java.flickr.auth.Permission
+import com.flickr4java.flickr.auth.{Auth, Permission}
+import com.sun.javafx.geom.Matrix3f
 import com.typesafe.scalalogging.LazyLogging
+
+import scala.concurrent.{Await, Future, Promise}
+import scalafx.event.EventHandler
+import scalafx.geometry.Point2D
 
 //import scalafx.Includes._
 //import scalafx.application.{JFXApp, Platform}
@@ -30,7 +37,11 @@ import scalafx.scene.control.{Button, Label}
 import com.ainvar.flickeruploader.action.FileSystem
 
 import org.scribe.model.{Token, Verifier}
+/*
+Docs::
+https://www.flickr.com/services/api/upload.api.html
 
+ */
 //case class DialogTextData(tableName:String, connString:String, filePath:String)
 case class DialogTextData(praticaId:String)
 
@@ -47,7 +58,6 @@ object Main extends JFXApp with LazyLogging {
 
   var folderToUpload = ""
 
-val lblFileSelected = new Label("Cartella delle foto")
 //  private def createOpenButton() = new Button {
 //    id = "openButton"
 //    onAction = (ae: ActionEvent) => {
@@ -82,6 +92,39 @@ val lblFileSelected = new Label("Cartella delle foto")
 //        }
 //      }
 
+      def upload = {
+
+        if(tokenByWeb.visible.value) {
+          val auth = flik.grantFirstAuth(tokenByWeb.text.value)
+
+          val pw = new PrintWriter(new File("token.txt" ))
+          pw.write(auth.accessToken.getToken)
+          pw.write(";")
+          pw.write(auth.accessToken.getSecret)
+          pw.close()
+
+          logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
+        }
+        flik.uploadFotos(folderToUpload)
+      }
+
+      def recUpload = {
+
+        if(tokenByWeb.visible.value) {
+          val auth = flik.grantFirstAuth(tokenByWeb.text.value)
+
+          val pw = new PrintWriter(new File("token.txt" ))
+          pw.write(auth.accessToken.getToken)
+          pw.write(";")
+          pw.write(auth.accessToken.getSecret)
+          pw.close()
+
+          logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
+        }
+
+        flik.RecUpload(folderToUpload)
+      }
+
       val menuBar = new MenuBar
       val fileMenu = new Menu("File")
       val toolsMenu = new Menu("Tools")
@@ -95,12 +138,17 @@ val lblFileSelected = new Label("Cartella delle foto")
       val exitItem = new MenuItem("Exit")
       exitItem.accelerator =  new KeyCodeCombination(KeyCode.X, KeyCombination.ControlDown)
 
-      val uploadAllPixItem = new MenuItem("Upload all pictures")
-      exitItem.accelerator =  new KeyCodeCombination(KeyCode.U, KeyCombination.ControlDown)
+      val folderUpload = new MenuItem("Upload folder pics")
+      folderUpload.accelerator =  new KeyCodeCombination(KeyCode.U, KeyCombination.ControlDown)
+      folderUpload.onAction = _ => upload
+
+      val treeUpload = new MenuItem("Upload tree pics")
+      treeUpload.accelerator =  new KeyCodeCombination(KeyCode.T, KeyCombination.ControlDown)
+      treeUpload.onAction = _ => recUpload
 
       fileMenu.items = List(openItem, new SeparatorMenuItem, exitItem)
 
-      toolsMenu.items = List(uploadAllPixItem)
+      toolsMenu.items = List(folderUpload, treeUpload)
 
 //      val checkMenu = new Menu("Checks")
 //      val check1 = new CheckMenuItem("check 1")
@@ -120,7 +168,7 @@ val lblFileSelected = new Label("Cartella delle foto")
 //      typeMenu.items = List(checkMenu, radioMenu)
 
       menuBar.menus=List(fileMenu, toolsMenu)
-      menuBar.prefWidth = 600
+      menuBar.prefWidth = 700
 
 //      val menuButton = new MenuButton("Menu button")
 //      menuButton.items = List(new MenuItem("Button 1"), new MenuItem("Button 2"), new MenuItem("Button 3"))
@@ -134,25 +182,30 @@ val lblFileSelected = new Label("Cartella delle foto")
 //      splitMenuButton.layoutY = 150
 
       val btnUpload = new Button(){
-        layoutY = 100
+        layoutY = 120
         layoutX = 29
-        text = "Upload"
+        text = "Folder upload"
       }
 
-      val btnRecUploadSimulation = new Button(){
-        layoutY = 140
+      val btnRecUpload = new Button(){
+        layoutY = 160
         layoutX = 29
-        text = "Upload"
+        text = "Recursive Upload!!"
       }
 
-      val label = new Label("Welcome!!")
+      val label = new Label("")
       label.layoutX = 29
-      label.layoutY = 50
+      label.layoutY = 70
 
       val tokenByWeb = new TextField() {
         promptText = "Token from web!"
         visible = false
-        layoutY = 70
+        layoutY = 90
+        layoutX = 29
+      }
+
+      val userData = new Label("") {
+        layoutY = 35
         layoutX = 29
       }
 
@@ -160,7 +213,7 @@ val lblFileSelected = new Label("Cartella delle foto")
       label.contextMenu = contextMenu
 
 //      content = List(menuBar, menuButton, splitMenuButton, label)
-      content = List(menuBar, label, tokenByWeb, btnUpload, btnRecUploadSimulation)
+      content = List(menuBar, userData, label, tokenByWeb, btnUpload, btnRecUpload)
 
       exitItem.onAction = _ => {
         logger.info("Ciao!!")
@@ -173,21 +226,13 @@ val lblFileSelected = new Label("Cartella delle foto")
         }
 
         val selectedFolder: File = dc.showDialog(stage)
-        folderToUpload = selectedFolder.toString
+
+        folderToUpload = if(selectedFolder.exists()) selectedFolder.toString else ""
 //        val fc = new FileChooser
 //        val selectedFile = fc.showOpenDialog(stage)
         logger.info("Folder selected for upload: " + selectedFolder)
-        label.text = "Ready: " + selectedFolder
 
-        if(!FileSystem.exist("token.txt")) {
-          btnUpload.disable = true
-          val url = flik.openAuthenticationUrl
-          label.text = "Need authentication to go ahead! Follow link " + url + " in the browser"
-          tokenByWeb.visible = true
-        }
-        else
-          tokenByWeb.visible = false
-
+        label.text = "Ready: " + selectedFolder + "\n"
       }
 
       tokenByWeb.onKeyPressed =_ => {
@@ -197,26 +242,10 @@ val lblFileSelected = new Label("Cartella delle foto")
       btnUpload.onAction = _ => {
         logger.info("Upload button pressed!!")
         logger.info("Folder choosen for upload: " + folderToUpload)
-        if(tokenByWeb.visible.value){
-          val auth = flik.grantFirstAuth(tokenByWeb.text.value)
-
-          val pw = new PrintWriter(new File("token.txt" ))
-          pw.write(auth.accessToken.getToken)
-          pw.write(";")
-          pw.write(auth.accessToken.getSecret)
-          pw.close()
-
-          logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
-        }
-        else {
-          val tokenContent: List[String] = FileSystem.readTextFile("token.txt").split(";").toList
-          val accessToken = new Token(tokenContent.head,tokenContent.last)
-          val auth = flik.grantAuth(accessToken)
-        }
-        flik.uploadFotos(folderToUpload)
+        upload
       }
 
-      btnRecUploadSimulation.onAction = _ => {
+      btnRecUpload.onAction = _ => {
 //        logger.info("Upload simulation button pressed!!")
 //        logger.info("Folder choosen for simulate the upload: " + folderToUpload)
 //        val tree: Stream[File] = FileSystem.getFileTreeTailRec(new File(folderToUpload), Stream.empty)
@@ -237,7 +266,41 @@ val lblFileSelected = new Label("Cartella delle foto")
         /*val files: Stream[File] = FileSystem.getFileTreeTailRec(new File(folderToUpload))
 
         for(file <- files) println(file.getName)*/
-        flik.uploadRec(folderToUpload)
+        logger.info("Upload button pressed!!")
+        logger.info("Folder choosen for upload: " + folderToUpload)
+
+        recUpload
+      }
+
+      onShown = _ =>
+      {
+        if(!FileSystem.exist("token.txt")) {
+          btnUpload.disable = true
+          val url = flik.openAuthenticationUrl
+          label.text = "Need authentication to go ahead! Follow link " + url + " in the browser"
+          tokenByWeb.visible = true
+        }
+        else {
+          // Granting connection thru memorized token in file token.txt
+          val tokenContent: List[String] = FileSystem.readTextFile("token.txt").split(";").toList
+          val accessToken = new Token(tokenContent.head,tokenContent.last)
+          val auth: Auth = flik.grantAuth(accessToken)
+          userData.text = "Welcome " + auth.getUser.getUsername + "!!!! Access granted!"
+
+//          println("inizio dati utente")
+//          println(auth.getUser)
+//          println(auth.getUser.getPhotoLimits)
+//          println(auth.getUser.getPhotosurl)
+//          println(auth.getUser.getProfileurl)
+//          println(auth.getUser)
+//          System.out.println("nsid: " + auth.getUser.getId)
+//          System.out.println("Realname: " + auth.getUser.getRealName)
+//          System.out.println("Username: " + auth.getUser.getUsername)
+//          System.out.println("Permission: " + auth.getPermission.getType)
+//          println("Fine dati utente")
+          logger.info("Access granted!! Access token:" + auth.getToken)
+          tokenByWeb.visible = false
+        }
       }
     }
   }

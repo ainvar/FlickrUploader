@@ -26,7 +26,7 @@ object FileSystem {
     f #:: (if (f.isDirectory) f.listFiles().toStream.flatMap(getFileTreeRec)
     else Stream.empty)
 
-
+  //TODO not tailrec - need adjustment
   def getFileTreeTailRec(f: File, acc: Stream[File] = Stream.empty): Stream[File] =
     if (f.isDirectory) {
       println("Directory!!!  :  " + f.getAbsolutePath)
