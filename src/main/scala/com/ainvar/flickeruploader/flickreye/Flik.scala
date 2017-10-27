@@ -57,8 +57,13 @@ object Flik {
 class Flik  extends LazyLogging {
   val apiKey = ""
   val secret = ""
+  //todo: set to private
+  val flickr = new Flickr(apiKey, secret, new REST)
 
-  private lazy val flickr = new Flickr(apiKey, secret, new REST)
+  //todo: set to private
+  lazy val userId = getCurrentRequestContext.getAuth.getUser.getId
+
+  private lazy val locRequestContext = RequestContext.getRequestContext
 
   private lazy val authInterface = flickr.getAuthInterface
 
@@ -110,29 +115,49 @@ class Flik  extends LazyLogging {
     FileDetails(elems.head, suffix, tags, getTagsFromAbsolutePath(file.getAbsolutePath))
   }
 
+  private def checkAuth = {
+    if(RequestContext.getRequestContext.getAuth == null)
+      RequestContext.getRequestContext.setAuth(locRequestContext.getAuth)
+  }
+
   private def upload(file: File, metaData: UploadMetaData)= {
-      val uploader = flickr.getUploader()
-      val photoId = uploader.upload(file, metaData)
-      logger.info(" File : " + file.getName + " uploaded: photoId = " + photoId)
-      photoId
+    checkAuth
+    val uploader = flickr.getUploader()
+    val photoId = uploader.upload(file, metaData)
+    logger.info(" File : " + file.getName + " uploaded: photoId = " + photoId)
+    photoId
+  }
+
+  def getCurrentRequestContext: RequestContext = RequestContext.getRequestContext
+
+  def getCurrentPhotosInterface = {
+    checkAuth
+    flickr.getPhotosInterface
+  }
+
+  def getCurrentPhotosetInterface = {
+    checkAuth
+    flickr.getPhotosetsInterface
   }
 
   def grantFirstAuth(webToken: String): LastStepAuth = {
     val accessToken = getAccessToken(webToken)
     val auth = authInterface.checkToken(accessToken)
     RequestContext.getRequestContext.setAuth(auth)
+    locRequestContext
     LastStepAuth(accessToken, auth)
   }
 
   def grantAuth(accessToken: Token): Auth = {
     val auth = authInterface.checkToken(accessToken)
     RequestContext.getRequestContext.setAuth(auth)
+    locRequestContext
     auth
   }
 
   def openAuthenticationUrl: String = firstStepAuth.authUrl
 
-  def uploadFotos(folder: String) = {
+  def uploadFotos(folder: String): Int = {
     logger.info("I'm uploading...")
     val tagsFromFolderName: List[String] = folder.split("/").last.split("-").toList
 
@@ -170,17 +195,14 @@ class Flik  extends LazyLogging {
         metaData.setTags(tagCollection)
         metaData.setFilename(file.getName)
 
-        val uploader = flickr.getUploader()
-
-        val photoId = uploader.upload(file, metaData)
-
-        logger.info(" File : " + file.getName + " uploaded: photoId = " + photoId)
+        upload(file, metaData)
       }
       else
         logger.info("No valid suffix: " + suffix)
     }
-    logger.info(s"All pictures inside folder: $folder uploaded successfully!!")
-    files.length
+    val numPics = files.length
+    logger.info(s"All $numPics pictures inside folder: $folder uploaded successfully!!")
+    numPics
   }
 
   def RecUpload(folder: String) = {

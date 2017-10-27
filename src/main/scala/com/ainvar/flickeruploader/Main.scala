@@ -1,21 +1,21 @@
 package com.ainvar.flickeruploader
 
+import akka.actor.ActorSystem
+import com.ainvar.flickeruploader.actors.UploaderActor
+
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
+//######################
+
 import java.io.{File, PrintWriter}
-import javafx.event.EventHandler
-import javafx.stage.WindowEvent
 
 import com.ainvar.flickeruploader.flickreye.Flik
+import com.flickr4java.flickr.auth.Auth
+import com.typesafe.scalalogging.LazyLogging
 
 import scalafx.scene.control._
 import scalafx.scene.input.{KeyCode, KeyCodeCombination, KeyCombination}
 import scalafx.stage.DirectoryChooser
-import com.flickr4java.flickr.auth.{Auth, Permission}
-import com.sun.javafx.geom.Matrix3f
-import com.typesafe.scalalogging.LazyLogging
-
-import scala.concurrent.{Await, Future, Promise}
-import scalafx.event.EventHandler
-import scalafx.geometry.Point2D
 
 //import scalafx.Includes._
 //import scalafx.application.{JFXApp, Platform}
@@ -29,21 +29,20 @@ import scalafx.geometry.Point2D
 //import scalafx.scene.layout.{BorderPane, GridPane, StackPane}
 //import scalafx.stage.FileChooser
 
+import com.ainvar.flickeruploader.action.FileSystem
+import org.scribe.model.Token
+
 import scalafx.application.JFXApp
 import scalafx.application.JFXApp.PrimaryStage
 import scalafx.scene.Scene
 import scalafx.scene.control.{Button, Label}
-
-import com.ainvar.flickeruploader.action.FileSystem
-
-import org.scribe.model.{Token, Verifier}
 /*
 Docs::
 https://www.flickr.com/services/api/upload.api.html
 
  */
-//case class DialogTextData(tableName:String, connString:String, filePath:String)
-case class DialogTextData(praticaId:String)
+
+//######################
 
 object Main extends JFXApp with LazyLogging {
   // UI build
@@ -52,10 +51,20 @@ object Main extends JFXApp with LazyLogging {
   // Named arguments have a form: --name=value
   // For instance, "--output=alpha beta" is interpreted as named argument "output"
   // with value "alpha" and unnamed parameter "beta".
+
   logger.info("Command line arguments:\n" +
     "  unnamed: " + parameters.unnamed.mkString("[", ", ", "]") + "\n" +
     "  named  : " + parameters.named.mkString("[", ", ", "]"))
 
+  implicit lazy val timeout: akka.util.Timeout = 6 hours
+  val system = ActorSystem("UploaderEcosystem")
+  val executer = system.actorOf(UploaderActor.props, "UploaderActor-" + java.util.UUID.randomUUID().toString().replace("-", ""))
+
+//  (executer ? MainExecuter.DrawUI)
+//    .recover { case t: Throwable => {
+//      executer ! PoisonPill
+//    }
+//    }
   var folderToUpload = ""
 
 //  private def createOpenButton() = new Button {
@@ -91,24 +100,35 @@ object Main extends JFXApp with LazyLogging {
 //          }
 //        }
 //      }
+//      private lazy val savedToken =
 
-      def upload = {
-
-        if(tokenByWeb.visible.value) {
-          val auth = flik.grantFirstAuth(tokenByWeb.text.value)
-
-          val pw = new PrintWriter(new File("token.txt" ))
-          pw.write(auth.accessToken.getToken)
-          pw.write(";")
-          pw.write(auth.accessToken.getSecret)
-          pw.close()
-
-          logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
-        }
-        flik.uploadFotos(folderToUpload)
+      private def getSavedToken: Token = {
+        val tokenContent: List[String] = FileSystem.readTextFile("token.txt").split(";").toList
+        new Token(tokenContent.head,tokenContent.last)
       }
 
-      def recUpload = {
+      def upload: Int = {
+
+        if(tokenByWeb.visible.value) {
+          val auth = flik.grantFirstAuth(tokenByWeb.text.value)
+
+          val pw = new PrintWriter(new File("token.txt" ))
+          pw.write(auth.accessToken.getToken)
+          pw.write(";")
+          pw.write(auth.accessToken.getSecret)
+          pw.close()
+
+          logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
+        }
+        executer ! UploaderActor.Upload(flik, folderToUpload)
+
+//        val numFotos = flik.uploadFotos(folderToUpload)
+//        logger.info(s"Uploaded successfully n. $numFotos pictures")
+//        numFotos
+        0
+      }
+
+      def recUpload: Int = {
 
         if(tokenByWeb.visible.value) {
           val auth = flik.grantFirstAuth(tokenByWeb.text.value)
@@ -122,7 +142,8 @@ object Main extends JFXApp with LazyLogging {
           logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
         }
 
-        flik.RecUpload(folderToUpload)
+        executer ! UploaderActor.RecUpload(flik, folderToUpload)
+        0
       }
 
       val menuBar = new MenuBar
@@ -191,6 +212,12 @@ object Main extends JFXApp with LazyLogging {
         layoutY = 160
         layoutX = 29
         text = "Recursive Upload!!"
+      }
+
+      val btnBackupAll = new Button(){
+        layoutY = 200
+        layoutX = 29
+        text = "Backup All"
       }
 
       val label = new Label("")
@@ -272,6 +299,13 @@ object Main extends JFXApp with LazyLogging {
         recUpload
       }
 
+      btnBackupAll.onAction = _ => {
+        val photoI = flik.getCurrentPhotosInterface
+        val photoSetI = flik.getCurrentPhotosetInterface
+
+        ///val PhotoSets = photoSetI.getli
+      }
+
       onShown = _ =>
       {
         if(!FileSystem.exist("token.txt")) {
@@ -285,20 +319,10 @@ object Main extends JFXApp with LazyLogging {
           val tokenContent: List[String] = FileSystem.readTextFile("token.txt").split(";").toList
           val accessToken = new Token(tokenContent.head,tokenContent.last)
           val auth: Auth = flik.grantAuth(accessToken)
-          userData.text = "Welcome " + auth.getUser.getUsername + "!!!! Access granted!"
 
-//          println("inizio dati utente")
-//          println(auth.getUser)
-//          println(auth.getUser.getPhotoLimits)
-//          println(auth.getUser.getPhotosurl)
-//          println(auth.getUser.getProfileurl)
-//          println(auth.getUser)
-//          System.out.println("nsid: " + auth.getUser.getId)
-//          System.out.println("Realname: " + auth.getUser.getRealName)
-//          System.out.println("Username: " + auth.getUser.getUsername)
-//          System.out.println("Permission: " + auth.getPermission.getType)
-//          println("Fine dati utente")
+          userData.text = "Welcome " + auth.getUser.getUsername + "!!!! Access granted!"
           logger.info("Access granted!! Access token:" + auth.getToken)
+
           tokenByWeb.visible = false
         }
       }
