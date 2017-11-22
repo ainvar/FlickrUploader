@@ -1,7 +1,12 @@
 package com.ainvar.flickeruploader
 
+import java.net.URL
+import java.util
+
 import akka.actor.ActorSystem
-import com.ainvar.flickeruploader.actors.UploaderActor
+import com.ainvar.flickeruploader.actors.{BackupActor, UploaderActor}
+import com.flickr4java.flickr.photos.{Photo, PhotoList, Size}
+import com.flickr4java.flickr.photosets.Photoset
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
@@ -56,9 +61,10 @@ object Main extends JFXApp with LazyLogging {
     "  unnamed: " + parameters.unnamed.mkString("[", ", ", "]") + "\n" +
     "  named  : " + parameters.named.mkString("[", ", ", "]"))
 
-  implicit lazy val timeout: akka.util.Timeout = 6 hours
+  implicit lazy val timeout: akka.util.Timeout = 20 hours
   val system = ActorSystem("UploaderEcosystem")
-  val executer = system.actorOf(UploaderActor.props, "UploaderActor-" + java.util.UUID.randomUUID().toString().replace("-", ""))
+  val uploaderActor = system.actorOf(UploaderActor.props, "UploaderActor-" + java.util.UUID.randomUUID().toString().replace("-", ""))
+  val backupActor = system.actorOf(BackupActor.props, "BackupActor-" + java.util.UUID.randomUUID().toString().replace("-", ""))
 
 //  (executer ? MainExecuter.DrawUI)
 //    .recover { case t: Throwable => {
@@ -120,7 +126,7 @@ object Main extends JFXApp with LazyLogging {
 
           logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
         }
-        executer ! UploaderActor.Upload(flik, folderToUpload)
+        uploaderActor ! UploaderActor.Upload(flik, folderToUpload)
 
 //        val numFotos = flik.uploadFotos(folderToUpload)
 //        logger.info(s"Uploaded successfully n. $numFotos pictures")
@@ -142,7 +148,7 @@ object Main extends JFXApp with LazyLogging {
           logger.info("Access granted!! Access token:" + auth.accessToken.getToken)
         }
 
-        executer ! UploaderActor.RecUpload(flik, folderToUpload)
+        uploaderActor ! UploaderActor.RecUpload(flik, folderToUpload)
         0
       }
 
@@ -240,7 +246,7 @@ object Main extends JFXApp with LazyLogging {
       label.contextMenu = contextMenu
 
 //      content = List(menuBar, menuButton, splitMenuButton, label)
-      content = List(menuBar, userData, label, tokenByWeb, btnUpload, btnRecUpload)
+      content = List(menuBar, userData, label, tokenByWeb, btnUpload, btnRecUpload, btnBackupAll)
 
       exitItem.onAction = _ => {
         logger.info("Ciao!!")
@@ -299,11 +305,63 @@ object Main extends JFXApp with LazyLogging {
         recUpload
       }
 
-      btnBackupAll.onAction = _ => {
-        val photoI = flik.getCurrentPhotosInterface
-        val photoSetI = flik.getCurrentPhotosetInterface
+      //todo: disabled because doesn't work with the video, download an image instead of the original video
+      btnBackupAll.disable = true
 
-        ///val PhotoSets = photoSetI.getli
+      btnBackupAll.onAction = _ => {
+        backupActor ! BackupActor.BackupAll(flik, folderToUpload, true)
+//        val limit = 4
+//
+//
+//
+//        def backupAllPhotosInSet(set: Photoset, albumFolder: File) = {
+//          val photoSetI = flik.getCurrentPhotosetInterface
+//          val photoI = flik.getCurrentPhotosInterface
+//
+//          val photoList: PhotoList[Photo] = photoSetI.getPhotos(set.getId, 500, 1)
+//
+//          val countInSet = photoList.size()
+//
+//          photoList.forEach(f => {
+//            logger.info("Photo name" + f.getTitle)
+//            import java.io.BufferedInputStream
+//            import java.io.FileOutputStream
+//            val largeUrl: String = f.getLargeUrl
+//            logger.info("Url photo: " + largeUrl)
+//            val url: URL = new URL(largeUrl)
+//
+//            var filename: String = url.getFile
+//            filename = filename.substring(filename.lastIndexOf("/") + 1, filename.length)
+//            logger.info("Now writing " + filename + " to " + albumFolder.getCanonicalPath)
+//            val inStream: BufferedInputStream = new BufferedInputStream(photoI.getImageAsStream(f, Size.LARGE))
+//            val newFile: File = new File(albumFolder, filename)
+//
+//            val fos: FileOutputStream = new FileOutputStream(newFile)
+//
+//            Stream.continually(fos.write(inStream.read()))
+//
+//            fos.flush()
+//            fos.close()
+//          })
+//        }
+//
+//        def getNewFolderPath(folderPath: String, folderName: String) = folderPath.concat("/" + folderName)
+//
+//        def backupPhotoset(photoSet:Photoset) = {
+//          val albumName = photoSet.getTitle
+//          val newFolderPath = getNewFolderPath(folderToUpload, albumName)
+//          logger.info("Album name: " + albumName)
+//          val albumFolder = new File(newFolderPath)
+//          albumFolder mkdir()
+//          logger.info("Created new folder in: " + newFolderPath)
+//
+//          backupAllPhotosInSet(photoSet, albumFolder)
+//        }
+//
+//        val photoSets: util.Collection[Photoset] = flik.getCurrentPhotosetInterface.getList(flik.userId).getPhotosets
+//
+//        photoSets.forEach(set => backupPhotoset(set))
+
       }
 
       onShown = _ =>

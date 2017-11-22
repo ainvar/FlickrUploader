@@ -1,10 +1,13 @@
 package com.ainvar.flickeruploader.flickreye
 
-import java.io.File
-import java.net.URI
+import java.io.{BufferedInputStream, File, InputStream}
+import java.net.{URI, URL}
 import java.util
+import java.util.function.Consumer
 
 import com.ainvar.flickeruploader.action.FileSystem
+import com.flickr4java.flickr.photos.{Photo, PhotoList, PhotosInterface, Size}
+import com.flickr4java.flickr.photosets.Photoset
 import com.typesafe.scalalogging.LazyLogging
 import org.scribe.model.{Token, Verifier}
 //import play.api.libs.ws.ahc.AhcWSClient
@@ -15,11 +18,33 @@ import com.flickr4java.flickr.auth.{Auth, Permission}
 import com.flickr4java.flickr.uploader.UploadMetaData
 import com.flickr4java.flickr.{Flickr, REST, RequestContext}
 
+import java.util.concurrent.TimeUnit
 
 case class FirstStepAuthData(requestToken: Token, authUrl: String)
 case class LastStepAuth(accessToken: Token, auth:Auth)
 
 case class FileDetails(name:String, suffix: String, tags: Array[String], tagsFromFolder: Array[String])
+
+trait Debug{
+  def debugVars[T](obj: T):Any = {
+
+    val vars = obj.getClass.getDeclaredFields
+
+    for(v <- vars){
+      v.setAccessible(true)
+      println("Field: " + v.getName() + " => " + v.get(obj))
+    }
+
+    val resCalls = obj.getClass.getDeclaredMethods
+
+    for(r <- resCalls){
+      r.setAccessible(true)
+      if(r.getParameterCount ==0)
+        println("Methods: " + r.getName() + " => " + r.invoke(obj))
+    }
+
+  }
+}
 
 object Flik {
   val photoSuffixes = Set("jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff")
@@ -54,14 +79,18 @@ object Flik {
   }
 }
 
-class Flik  extends LazyLogging {
+class Flik  extends LazyLogging with Debug {
   val apiKey = ""
   val secret = ""
-  //todo: set to private
-  val flickr = new Flickr(apiKey, secret, new REST)
 
-  //todo: set to private
-  lazy val userId = getCurrentRequestContext.getAuth.getUser.getId
+  private val flickr = new Flickr(apiKey, secret, new REST)
+
+  private lazy val userId = getCurrentRequestContext.getAuth.getUser.getId
+
+  private val startTime = System.nanoTime()
+  private var totCalls = 100
+  private val limit = 3600
+  private def incrementTotCalls = {totCalls = totCalls +1}
 
   private lazy val locRequestContext = RequestContext.getRequestContext
 
@@ -104,7 +133,7 @@ class Flik  extends LazyLogging {
 
     val tags =
       if(elems.tail.length ==0)
-                  Array[String]()
+        Array[String]()
       else{
         println("######### tail:" + elems.tail.mkString("*"))
         elems.tail.head.split("-")
@@ -115,9 +144,105 @@ class Flik  extends LazyLogging {
     FileDetails(elems.head, suffix, tags, getTagsFromAbsolutePath(file.getAbsolutePath))
   }
 
+  private def getElapsedTime: Long = TimeUnit.NANOSECONDS.toHours(System.nanoTime() - startTime)
+
+  private def checkLimitExceeded = {
+    val elapsed = getElapsedTime
+    val secCalc = if(elapsed < 1) 1 else elapsed
+    if (totCalls >= limit * secCalc) {
+      logger.warn("Call number exceeded the limit for a time unity of one hour - Total calls: " + totCalls + " - time elapsed: " + getElapsedTime)
+      true
+    } else false
+  }
+
   private def checkAuth = {
     if(RequestContext.getRequestContext.getAuth == null)
       RequestContext.getRequestContext.setAuth(locRequestContext.getAuth)
+  }
+
+  //todo: need to know how much time to wait, now the app wait for an hour to have for sure once again all the availability
+  private def limitExceededBehaviour = {
+    Thread.sleep(3600000)
+  }
+
+  private def downloadFoto(photo:Photo, photoI: PhotosInterface): InputStream = {
+    if(checkLimitExceeded) limitExceededBehaviour
+    incrementTotCalls
+    photoI.getImageAsStream(photo, Size.ORIGINAL)
+  }
+
+  private def downloadVideo(video:Photo, photoI: PhotosInterface): InputStream = {
+    if(checkLimitExceeded) limitExceededBehaviour
+    incrementTotCalls
+    photoI.getImageAsStream(video, Size.VIDEO_ORIGINAL)
+  }
+
+  private def getSuffix(fileName:String) = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase
+
+  //private def isVideo(fileName: String) =
+
+  private def saveMedia(albumFolder:String, fileName: String, photo:Photo, photoI: PhotosInterface) = {
+    FileSystem.saveStream(
+      new File(albumFolder, fileName),
+      new BufferedInputStream(
+        {
+          if (Flik.videoSuffixes.contains(getSuffix(fileName)))
+            downloadVideo(photo, photoI)
+          else
+            downloadFoto(photo, photoI)
+        }
+      )
+    )
+  }
+
+  private def backupAllPhotosInSet(set: Photoset, albumFolder: File, test:Boolean = false): Int = {
+    val photoSetI = getCurrentPhotosetInterface
+    val photoI = getCurrentPhotosInterface
+
+    val photoList: PhotoList[Photo] = photoSetI.getPhotos(set.getId, 500, 1)
+
+    val countInSet = photoList.size()
+
+    logger.info("discovered n. " + countInSet + "in album: " + albumFolder.getName)
+
+    val prova = List[Photo](photoList.get(0))
+
+    prova.foreach(f => {
+      logger.info("Photo name: " + f.getTitle)
+
+      val originalUrl: String = f.getOriginalUrl
+
+      debugVars[Photo](f)
+
+      val url: URL = new URL(originalUrl)
+
+      // todo: name generation with tags
+      var filename: String = url.getFile
+      filename = filename.substring(filename.lastIndexOf("/") + 1, filename.length)
+      val albumFoldertPath = albumFolder.getCanonicalPath
+      logger.info("Now writing " + filename + " to " + albumFoldertPath)
+
+      if(!test)
+        saveMedia(albumFoldertPath, filename, f, photoI)
+
+      logger.info("Photo name: " + f.getTitle + " SAVED")
+    })
+    logger.info(albumFolder.getName + " backup finished!!")
+    countInSet
+  }
+
+  private def getNewFolderPath(folderPath: String, folderName: String) = folderPath.concat("/" + folderName)
+
+  private def backupPhotoset(photoSet:Photoset, backupFolder: String, test:Boolean = false): Int = {
+    logger.info("Call counter: " + totCalls)
+    val albumName = photoSet.getTitle
+    val newFolderPath = getNewFolderPath(backupFolder, albumName)
+    logger.info("Album name: " + albumName)
+    val albumFolder = new File(newFolderPath)
+    albumFolder mkdir()
+    logger.info("Created new folder in: " + newFolderPath)
+
+    backupAllPhotosInSet(photoSet, albumFolder, test)
   }
 
   private def upload(file: File, metaData: UploadMetaData)= {
@@ -125,6 +250,7 @@ class Flik  extends LazyLogging {
     val uploader = flickr.getUploader()
     val photoId = uploader.upload(file, metaData)
     logger.info(" File : " + file.getName + " uploaded: photoId = " + photoId)
+    totCalls = totCalls + 1
     photoId
   }
 
@@ -145,6 +271,7 @@ class Flik  extends LazyLogging {
     val auth = authInterface.checkToken(accessToken)
     RequestContext.getRequestContext.setAuth(auth)
     locRequestContext
+    userId
     LastStepAuth(accessToken, auth)
   }
 
@@ -152,6 +279,7 @@ class Flik  extends LazyLogging {
     val auth = authInterface.checkToken(accessToken)
     RequestContext.getRequestContext.setAuth(auth)
     locRequestContext
+    userId
     auth
   }
 
@@ -175,6 +303,7 @@ class Flik  extends LazyLogging {
     logger.info("file discovered :" + files.length)
 
     for(file <- files){
+      incrementTotCalls
       val suffix = file.getName.substring(file.getName.lastIndexOf('.') + 1).toLowerCase
       if(Flik.isValidSuffix(file.getName)) {
         val elems = file.getName.substring(0, file.getName.lastIndexOf('.')).split("-")
@@ -206,6 +335,7 @@ class Flik  extends LazyLogging {
   }
 
   def RecUpload(folder: String) = {
+    incrementTotCalls
     logger.info("I'm uploading all tree...")
     val files: Stream[File] = FileSystem.getFileTreeTailRec(new File(folder))
     for(file <- files){
@@ -238,6 +368,15 @@ class Flik  extends LazyLogging {
         logger.info("No valid suffix: " + fileDetails.suffix)
     }
     0
+  }
+
+  def backupAll(backupFolder:String, test:Boolean = false): Int = {
+    require(userId != null)
+    val photoSets: util.Collection[Photoset] = getCurrentPhotosetInterface.getList(userId).getPhotosets
+
+    photoSets forEach(set => backupPhotoset(set, backupFolder, test))
+    logger.info("All backup finished!!")
+    photoSets size
   }
 
 // uploader.upload()

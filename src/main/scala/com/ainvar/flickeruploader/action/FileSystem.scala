@@ -6,7 +6,7 @@ import com.ainvar.flickeruploader.control._
 
 import scala.annotation.tailrec
 /*
-To convert in scala way IO access, using lib as:
+Todo:  convert in scala way IO access, using lib as:
 scala-io
 rapture.io
 Or libs from the Java world, such as Google Guava or Apache Commons IO.
@@ -20,6 +20,24 @@ object FileSystem {
   def exist(filePath: String): Boolean = {
     val fileTemp = new File(filePath)
     if(fileTemp.exists()) true else false
+  }
+
+  def saveStream(file:File, stream: BufferedInputStream) = {
+    val fos: FileOutputStream = new FileOutputStream(file)
+    try {
+      var c = 0
+      while ( {
+        c = stream.read
+        c != -1
+      }) {
+        fos.write(c)
+      }
+    } catch {
+      case e: IOException => e.printStackTrace
+    } finally {
+      fos.flush()
+      fos.close()
+    }
   }
 
   def getFileTreeRec(f: File): Stream[File] =
