@@ -3,7 +3,7 @@ package com.ainvar.flickeruploader
 import akka.actor.{Actor, ActorLogging, AllForOneStrategy, SupervisorStrategy}
 import akka.actor.SupervisorStrategy.{Decider, Escalate}
 
-package object actors {
+package actors {
   trait Message
 
   trait EscalateStrategy {
